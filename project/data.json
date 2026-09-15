@@ -1,0 +1,23 @@
+[
+  {
+    "amount": 500.0,
+    "category": "Еда",
+    "date": "2026-09-15",
+    "description": "Столовка",
+    "id": "cda9fbb8-31bf-471d-819f-03b7d91777bb"
+  },
+  {
+    "amount": 5000.0,
+    "category": "Транспорт",
+    "date": "2026-09-15",
+    "description": "Такси",
+    "id": "fc40aaee-513a-4b29-bd9e-973b85e9f78d"
+  },
+  {
+    "amount": 5000.0,
+    "category": "Развлечения",
+    "date": "2026-09-15",
+    "description": "Компы ночь",
+    "id": "229f0e12-c5d0-4c93-90ef-e492bd5fd2be"
+  }
+]

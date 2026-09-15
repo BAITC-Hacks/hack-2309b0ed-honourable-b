@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Учёт личных расходов студента</title>
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  :root {
+    --bg: #f5f6fa;
+    --card: #ffffff;
+    --primary: #4f46e5;
+    --primary-hover: #4338ca;
+    --danger: #e53e3e;
+    --text: #1f2933;
+    --muted: #6b7280;
+    --border: #e5e7eb;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  .app {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 24px 16px 80px;
+  }
+  h1 {
+    font-size: 22px;
+    margin-bottom: 4px;
+  }
+  .subtitle {
+    color: var(--muted);
+    font-size: 14px;
+    margin-bottom: 20px;
+  }
+  .card {
+    background: var(--card);
+    border-radius: var(--radius);
+    padding: 18px;
+    margin-bottom: 16px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  }
+  .card h2 {
+    font-size: 16px;
+    margin: 0 0 14px 0;
+  }
+  form {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  form .full { grid-column: 1 / -1; }
+  label {
+    display: block;
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+  input, select {
+    width: 100%;
+    padding: 9px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 14px;
+    background: #fff;
+  }
+  input:focus, select:focus {
+    outline: none;
+    border-color: var(--primary);
+  }
+  button {
+    cursor: pointer;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+  }
+  .submit-btn {
+    grid-column: 1 / -1;
+    background: var(--primary);
+    color: white;
+    padding: 10px;
+    margin-top: 4px;
+    transition: background .15s;
+  }
+  .submit-btn:hover { background: var(--primary-hover); }
+  .error {
+    grid-column: 1 / -1;
+    color: var(--danger);
+    font-size: 13px;
+    margin-top: -2px;
+  }
+  .month-picker {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .month-picker input {
+    max-width: 180px;
+  }
+  .totals {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .total-pill {
+    background: #eef2ff;
+    color: var(--primary);
+    padding: 8px 14px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .total-pill.overall {
+    background: var(--primary);
+    color: white;
+  }
+  ul.expense-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .expense-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .expense-item:last-child { border-bottom: none; }
+  .expense-info {
+    display: flex;
+    flex-direction: column;
+  }
+  .expense-cat {
+    font-weight: 600;
+    font-size: 14px;
+  }
+  .expense-meta {
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .expense-amount {
+    font-weight: 600;
+    font-size: 14px;
+    margin-right: 12px;
+    white-space: nowrap;
+  }
+  .delete-btn {
+    background: transparent;
+    color: var(--danger);
+    font-size: 13px;
+    padding: 4px 8px;
+  }
+  .delete-btn:hover { text-decoration: underline; }
+  .empty-state {
+    color: var(--muted);
+    font-size: 14px;
+    text-align: center;
+    padding: 20px 0;
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useMemo, useCallback } = React;
+
+const CATEGORIES = ["Еда", "Транспорт", "Жильё", "Учёба", "Развлечения", "Здоровье", "Другое"];
+
+// Пусто = запросы идут на тот же origin, откуда отдана страница
+// (так и есть, когда backend сам раздаёт этот файл через StaticFiles).
+// Если открываете index.html отдельно от сервера — укажите тут адрес backend,
+// например "http://127.0.0.1:8000".
+const API_BASE = "";
+
+async function apiRequest(path, options) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    headers: { "Content-Type": "application/json" },
+    ...options,
+  });
+  if (!res.ok) {
+    let message = `Ошибка запроса (${res.status})`;
+    try {
+      const body = await res.json();
+      if (Array.isArray(body.detail)) {
+        message = body.detail
+          .map((d) => (typeof d.msg === "string" ? d.msg.replace(/^Value error,\s*/, "") : null))
+          .filter(Boolean)
+          .join("; ") || message;
+      } else if (typeof body.detail === "string") {
+        message = body.detail;
+      }
+    } catch (e) {
+      // ответ не JSON — оставляем стандартное сообщение
+    }
+    throw new Error(message);
+  }
+  if (res.status === 204) return null;
+  return res.json();
+}
+
+function fetchExpenses(month) {
+  return apiRequest(`/expenses?month=${encodeURIComponent(month)}`);
+}
+
+function createExpense(record) {
+  return apiRequest("/expenses", { method: "POST", body: JSON.stringify(record) });
+}
+
+function createExpensesBulk(records) {
+  return apiRequest("/expenses/bulk", { method: "POST", body: JSON.stringify({ items: records }) });
+}
+
+function removeExpense(id) {
+  return apiRequest(`/expenses/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+function clearAllExpenses() {
+  return apiRequest("/expenses", { method: "DELETE" });
+}
+
+function formatMoney(value) {
+  return value.toLocaleString("ru-RU", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+}
+
+function todayISO() {
+  const d = new Date();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
+
+function currentMonthValue() {
+  const d = new Date();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  return `${d.getFullYear()}-${mm}`;
+}
+
+function ExpenseForm({ onAdd }) {
+  const [amount, setAmount] = useState("");
+  const [category, setCategory] = useState(CATEGORIES[0]);
+  const [date, setDate] = useState(todayISO());
+  const [description, setDescription] = useState("");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+
+    const numericAmount = Number(amount);
+
+    // Быстрая проверка на клиенте — не ждём сервер ради опечаток.
+    // Финальная проверка всё равно на backend (см. apiRequest/onAdd).
+    if (amount.trim() === "" || Number.isNaN(numericAmount)) {
+      setError("Введите сумму числом.");
+      return;
+    }
+    if (numericAmount <= 0) {
+      setError("Сумма должна быть положительным числом.");
+      return;
+    }
+    if (!category) {
+      setError("Выберите категорию.");
+      return;
+    }
+    if (!date) {
+      setError("Укажите дату.");
+      return;
+    }
+
+    setSubmitting(true);
+    setError("");
+    try {
+      await onAdd({
+        amount: Math.round(numericAmount * 100) / 100,
+        category,
+        date,
+        description: description.trim() || null,
+      });
+      setAmount("");
+      setDescription("");
+    } catch (err) {
+      setError(err.message || "Не удалось сохранить расход.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="card">
+      <h2>Добавить расход</h2>
+      <form onSubmit={handleSubmit}>
+        <div>
+          <label>Сумма</label>
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            placeholder="Например, 500"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+          />
+        </div>
+        <div>
+          <label>Категория</label>
+          <select value={category} onChange={(e) => setCategory(e.target.value)}>
+            {CATEGORIES.map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label>Дата</label>
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+          />
+        </div>
+        <div>
+          <label>Описание (необязательно)</label>
+          <input
+            type="text"
+            placeholder="Например, обед в столовой"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+          />
+        </div>
+        {error && <div className="error">{error}</div>}
+        <button type="submit" className="submit-btn" disabled={submitting}>
+          {submitting ? "Добавляем…" : "Добавить"}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function MonthPicker({ month, onChange }) {
+  return (
+    <div className="card">
+      <h2>Месяц</h2>
+      <div className="month-picker">
+        <input
+          type="month"
+          value={month}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      </div>
+    </div>
+  );
+}
+
+function Totals({ total, byCategory }) {
+  const categories = Object.keys(byCategory);
+  return (
+    <div className="card">
+      <h2>Итоги за месяц</h2>
+      <div className="totals">
+        <span className="total-pill overall">Всего: {formatMoney(total)}</span>
+        {categories.length === 0 && (
+          <span style={{ color: "var(--muted)", fontSize: 13 }}>Нет расходов за выбранный месяц</span>
+        )}
+        {categories.map((cat) => (
+          <span key={cat} className="total-pill">
+            {cat}: {formatMoney(byCategory[cat])}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const PAGE_SIZE = 25;
+
+function Pagination({ page, totalPages, onChange, totalCount }) {
+  if (totalPages <= 1) return null;
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 12, fontSize: 13, color: "var(--muted)" }}>
+      <span>Всего записей: {totalCount}</span>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <button
+          className="delete-btn"
+          style={{ color: "var(--primary)" }}
+          disabled={page <= 1}
+          onClick={() => onChange(page - 1)}
+        >
+          Назад
+        </button>
+        <span>Стр. {page} из {totalPages}</span>
+        <button
+          className="delete-btn"
+          style={{ color: "var(--primary)" }}
+          disabled={page >= totalPages}
+          onClick={() => onChange(page + 1)}
+        >
+          Вперёд
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ExpenseList({ expenses, totalCount, onDelete, page, totalPages, onPageChange }) {
+  return (
+    <div className="card">
+      <h2>Расходы</h2>
+      {totalCount === 0 ? (
+        <div className="empty-state">За этот месяц пока нет расходов.</div>
+      ) : (
+        <React.Fragment>
+          <ul className="expense-list">
+            {expenses.map((exp) => (
+              <li key={exp.id} className="expense-item">
+                <div className="expense-info">
+                  <span className="expense-cat">{exp.category}</span>
+                  <span className="expense-meta">
+                    {exp.date}{exp.description ? ` · ${exp.description}` : ""}
+                  </span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center" }}>
+                  <span className="expense-amount">{formatMoney(exp.amount)}</span>
+                  <button className="delete-btn" onClick={() => onDelete(exp.id)}>
+                    Удалить
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+          <Pagination page={page} totalPages={totalPages} onChange={onPageChange} totalCount={totalCount} />
+        </React.Fragment>
+      )}
+    </div>
+  );
+}
+
+// Генератор тестовых данных — только для проверки производительности
+// на больших объёмах. Не влияет на основной сценарий.
+function generateTestData(count) {
+  const records = [];
+  const now = new Date();
+  for (let i = 0; i < count; i++) {
+    const monthsAgo = Math.floor(Math.random() * 6);
+    const d = new Date(now.getFullYear(), now.getMonth() - monthsAgo, 1 + Math.floor(Math.random() * 28));
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    records.push({
+      amount: Math.round((Math.random() * 3000 + 50) * 100) / 100,
+      category: CATEGORIES[Math.floor(Math.random() * CATEGORIES.length)],
+      date: `${yyyy}-${mm}-${dd}`,
+      description: null,
+    });
+  }
+  return records;
+}
+
+function DevTools({ onGenerate, onClear }) {
+  return (
+    <div className="card" style={{ background: "#fffbeb", border: "1px solid #fde68a" }}>
+      <h2>Проверка на больших объёмах (для команды)</h2>
+      <p style={{ fontSize: 13, color: "var(--muted)", marginTop: -6 }}>
+        Эти кнопки — только для тестирования производительности, в финальной сдаче их можно убрать.
+      </p>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <button
+          className="submit-btn"
+          style={{ gridColumn: "unset", background: "#d97706" }}
+          onClick={() => onGenerate(2000)}
+        >
+          Сгенерировать 2000 записей
+        </button>
+        <button
+          className="delete-btn"
+          style={{ border: "1px solid var(--danger)", padding: "9px 14px" }}
+          onClick={onClear}
+        >
+          Очистить все данные
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function App() {
+  // monthExpenses хранит только расходы ТЕКУЩЕГО выбранного месяца —
+  // их присылает backend уже отфильтрованными через GET /expenses?month=...
+  const [monthExpenses, setMonthExpenses] = useState([]);
+  const [month, setMonth] = useState(currentMonthValue());
+  const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    setLoadError("");
+    try {
+      const data = await fetchExpenses(month);
+      setMonthExpenses(data);
+    } catch (err) {
+      setLoadError(err.message || "Не удалось загрузить расходы с сервера.");
+    } finally {
+      setLoading(false);
+    }
+  }, [month]);
+
+  // Загружаем расходы заново при первом рендере и при смене месяца.
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  // При смене месяца всегда возвращаемся на первую страницу.
+  useEffect(() => {
+    setPage(1);
+  }, [month]);
+
+  async function handleAdd(record) {
+    await createExpense(record);
+    await reload();
+  }
+
+  async function handleDelete(id) {
+    // Убираем из интерфейса сразу, не дожидаясь ответа сервера —
+    // если удаление не удастся, просто перезагрузим список заново.
+    setMonthExpenses((prev) => prev.filter((e) => e.id !== id));
+    try {
+      await removeExpense(id);
+    } catch (err) {
+      setLoadError(err.message || "Не удалось удалить расход.");
+      reload();
+    }
+  }
+
+  async function handleGenerateTestData(count) {
+    setLoading(true);
+    try {
+      await createExpensesBulk(generateTestData(count));
+      await reload();
+    } catch (err) {
+      setLoadError(err.message || "Не удалось сгенерировать тестовые данные.");
+      setLoading(false);
+    }
+  }
+
+  async function handleClearAll() {
+    if (!confirm("Удалить все данные без возможности восстановления?")) return;
+    setLoading(true);
+    try {
+      await clearAllExpenses();
+      await reload();
+    } catch (err) {
+      setLoadError(err.message || "Не удалось очистить данные.");
+      setLoading(false);
+    }
+  }
+
+  const { total, byCategory } = useMemo(() => {
+    let sum = 0;
+    const map = {};
+    for (const e of monthExpenses) {
+      sum += e.amount;
+      map[e.category] = (map[e.category] || 0) + e.amount;
+    }
+    return { total: sum, byCategory: map };
+  }, [monthExpenses]);
+
+  const totalCount = monthExpenses.length;
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+
+  // Рендерим в DOM только текущую страницу — при тысячах записей
+  // это то, что реально спасает от подтормаживания интерфейса.
+  const pageExpenses = useMemo(() => {
+    const start = (safePage - 1) * PAGE_SIZE;
+    return monthExpenses.slice(start, start + PAGE_SIZE);
+  }, [monthExpenses, safePage]);
+
+  return (
+    <div className="app">
+      <h1>Учёт личных расходов студента</h1>
+      <p className="subtitle">Данные хранятся на сервере (backend) и переживают обновление страницы.</p>
+      {loadError && <div className="card" style={{ color: "var(--danger)" }}>{loadError}</div>}
+      <DevTools onGenerate={handleGenerateTestData} onClear={handleClearAll} />
+      <ExpenseForm onAdd={handleAdd} />
+      <MonthPicker month={month} onChange={setMonth} />
+      <Totals total={total} byCategory={byCategory} />
+      {loading ? (
+        <div className="card">
+          <div className="empty-state">Загрузка…</div>
+        </div>
+      ) : (
+        <ExpenseList
+          expenses={pageExpenses}
+          totalCount={totalCount}
+          onDelete={handleDelete}
+          page={safePage}
+          totalPages={totalPages}
+          onPageChange={setPage}
+        />
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
